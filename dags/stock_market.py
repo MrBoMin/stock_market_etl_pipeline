@@ -1,7 +1,8 @@
 from airflow.decorators import dag, task
 from airflow.hooks.base import BaseHook
 from airflow.sensors.base import PokeReturnValue
-from include.stock_market.tasks import _get_stock_prices
+from airflow.operators.python import PythonOperator
+from include.stock_market.tasks import _get_stock_prices,_store_stock_prices
 import datetime
 import requests
 
@@ -29,27 +30,24 @@ def stock_market_etl():
             print(PokeReturnValue(is_done=condition, xcom_value=url))
             return PokeReturnValue(is_done=condition, xcom_value=url)
         else:
-             return PokeReturnValue(is_done=condition, xcom_value=url)
-   
+            return PokeReturnValue(is_done=False, xcom_value=None)
 
-    @task
-    def get_stock_prices(result: PokeReturnValue, symbol: str):
-        print(result)
-        print(f"Is Done: {result.is_done}")
-        print(f"XCom Value (URL): {result.xcom_value}")
-        if result.is_done:
-            # Proceed with stock price retrieval
-            print(f"Fetching stock prices for {symbol} from {result.xcom_value}")
-            _get_stock_prices(result.xcom_value, symbol)
-        else:
-            print(f"API not available, cannot fetch stock prices for {symbol}")
 
-    # Invoke tasks
-    is_api_available_task = is_api_available()
-    stock_prices_task = get_stock_prices(is_api_available_task, SYMBOL)
+    get_stock_prices = python_task = PythonOperator(
+        task_id="get_stock_data",
+        python_callable= _get_stock_prices,
+        op_kwargs = {'url' : '{{ task_instance.xcom_pull(task_ids="is_api_available") }}', 'symbol' : SYMBOL}
+    )
 
+
+    store_stock_prices = PythonOperator(
+        task_id = "store_stock_prices", 
+        python_callable = _store_stock_prices,
+        op_kwargs = {'stock' : '{{task_instance.xcom_pull(task_ids="get_stock_prices")}}'}
+    )
     # Set task dependencies
-    is_api_available_task >> stock_prices_task
+    is_api_available() >> get_stock_prices
+    get_stock_prices >> store_stock_prices
 
 
 stock_market_etl()

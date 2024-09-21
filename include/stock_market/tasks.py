@@ -1,6 +1,8 @@
 import requests
 from airflow.hooks.base import BaseHook
 import json
+from minio import Minio
+from io import BytesIO
 
 def _get_stock_prices(url, symbol):
     print(f"Fetching stock prices from: {url}")
@@ -30,3 +32,31 @@ def _get_stock_prices(url, symbol):
     except Exception as e:
         print(f"An error occurred: {e}")
         return None
+
+
+
+
+def _store_stock_prices(stock):
+    minio = BaseHook.get_connection('minio')
+    client = Minio(
+        endpoint = minio.extra_dejson['endpoint_url'].split('//')[1],
+        access_key = minio.login,
+        secret_key = minio.password,
+        secure = False
+    )
+
+    bucket_name = 'stock_market'
+
+    if not client.bucket_exists(bucket_name):
+        client.make_bucket(bucket_name)
+    stock = json.loads(stock)
+    symbol = stock['meta']['symbol']
+    data = json.dumps(stock, ensure_ascii=False).encode('utf8')
+    objw = client.put_object(
+        bucket_name = bucket_name, 
+        object_name = f'{symbol}/price.json',
+        data = BytesIO(data),
+        length = len(data)
+    )
+
+    return f'{objw.bucket_name}/{symbol}'
